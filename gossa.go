@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"golang.org/x/net/http2"
 	"hash"
 	"html"
 	"html/template"
@@ -299,19 +300,21 @@ func main() {
 	var err error
 	rootPath, err = filepath.Abs(rootPath)
 	check(err)
-	server := &http.Server{Addr: *host + ":" + *port, Handler: handler}
+	handler = http.StripPrefix(*extraPath, http.FileServer(http.Dir(rootPath)))
+	mux := http.NewServeMux()
 
 	if !*ro {
-		http.HandleFunc(*extraPath+"rpc", rpc)
-		http.HandleFunc(*extraPath+"post", upload)
+		mux.HandleFunc(*extraPath+"rpc", rpc)
+		mux.HandleFunc(*extraPath+"post", upload)
 	}
-	http.HandleFunc(*extraPath+"zip", zipRPC)
-	http.HandleFunc("/", doContent)
-	handler = http.StripPrefix(*extraPath, http.FileServer(http.Dir(rootPath)))
+	mux.HandleFunc(*extraPath+"zip", zipRPC)
+	mux.HandleFunc("/", doContent)
 
+	server := &http.Server{Addr: *host + ":" + *port, Handler: mux}
+	http2.ConfigureServer(server, &http2.Server{MaxConcurrentStreams: 250})
 	fmt.Printf("Gossa starting on directory %s\n", rootPath)
 	fmt.Printf("Verbose: %t, Symlinks: %t, Read-Only: %t, Hidden-Files Skipped: %t\n", *verb, *symlinks, *ro, *skipHidden)
-	fmt.Printf("Listening on http://%s:%s%s\n", *host, *port, *extraPath)
+	fmt.Printf("Listening on http://%s:%s%s (HTTP/2 enabled)\n", *host, *port, *extraPath)
 	if err = server.ListenAndServe(); err != http.ErrServerClosed {
 		check(err)
 	}
